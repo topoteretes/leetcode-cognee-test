@@ -48,8 +48,7 @@ class GPT4Model(DeepEvalBaseLLM):
         og_parameters = {"n": chat_model.n, "temp": chat_model.temperature}
         chat_model.n = n
         chat_model.temperature = temperature
-        print("CONTEXT IS: ", self.context )
-        print("PROMPT IS: ", prompt)
+        prompt = str(self.context) + prompt
         generations = chat_model._generate([HumanMessage(prompt)]).generations
         completions = [r.text for r in generations]
         return completions
