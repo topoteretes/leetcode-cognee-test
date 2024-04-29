@@ -6,6 +6,8 @@ from deepeval.benchmarks.tasks import HumanEvalTask
 from deepeval.models import DeepEvalBaseLLM
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+import os
+import glob
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -53,21 +55,21 @@ class GPT4Model(DeepEvalBaseLLM):
         return completions
 
 
-import os
-import glob
-
 
 for i, task in enumerate(HumanEvalTask):
     print(f"Iteration {i}: {task}")
+    i = i + 1
 
-# Get a list of all files in the directory
+    # Get a list of all files in the directory
     files = glob.glob(f'continue_requests/request_{str(i)}.txt')
 
-# Sort the files by sequence number
+    # Sort the files by sequence number
     files.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
 
-# Iterate over the files
+    # Iterate over the files
+    print("Files: ", files)
     for file_path in files:
+
         with open(file_path, 'r') as file:
             # Load the file
             content = file.read()
@@ -81,7 +83,7 @@ for i, task in enumerate(HumanEvalTask):
 
             # Define benchmark with specific tasks and number of code generations
             benchmark = HumanEval(
-                tasks=[HumanEvalTask.HAS_CLOSE_ELEMENTS, HumanEvalTask.SORT_NUMBERS],
+                tasks=[task],
                 n=1,
 
             )

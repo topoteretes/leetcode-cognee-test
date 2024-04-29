@@ -4,3 +4,6 @@ fastapi~=0.109.2
 pydantic~=2.5.2
 python-dotenv~=1.0.1
 deepeval
+langchain-core
+langchain-community
+langchain-text-splitters
