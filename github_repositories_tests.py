@@ -6,6 +6,8 @@ import requests
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+from openai import OpenAI
+from pydantic import BaseModel
 
 load_dotenv()
 
@@ -16,7 +18,7 @@ HEADERS = {'Authorization': f'token {TOKEN}'}
 session = requests.Session()
 session.headers.update(HEADERS)
 
-def extract_pr_files_content(owner, repo, pull_number, session):
+def extract_pr_files_content(owner, repo, pull_number, session, max_files=None):
     """Extract the content of changed files from a GitHub pull request."""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pull_number}/files"
     response = session.get(url, headers={'Accept': 'application/vnd.github.v3.raw'})
@@ -25,6 +27,8 @@ def extract_pr_files_content(owner, repo, pull_number, session):
     result = {"prediction": None, "context": {}}
 
     for i, file_info in enumerate(files):
+        if max_files is not None and i >= max_files:
+            break  # Stop iteration if maximum number of files reached
         file_url = file_info['raw_url']
         file_response = session.get(file_url)
         file_content = file_response.text
@@ -95,8 +99,39 @@ def fetch_issue_data(issue_number, repo):
         # return comments_body_string
         return timeline_data, comments_body_string
 
+class Question(BaseModel):
+    """Answer."""
+    question: str
 
-def process_issue(issue, repo):
+def determine_issue_question(issue_title_body):
+    import instructor
+    from pydantic import BaseModel
+    from typing import List, Type
+    model = "gpt-4-1106-preview"
+    def create_structured_output(text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+        """Generate a response from a user query."""
+
+        client = instructor.from_openai(OpenAI())
+
+
+        return client.chat.completions.create(
+            model = model,
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"""Use the given format to create a very simple question that represents this PR issue: {text_input}. """,
+                },
+                {"role": "system", "content": system_prompt},
+            ],
+            response_model = response_model,
+        )
+
+    response = create_structured_output(issue_title_body, "What is the question?", Question)
+
+    return response
+
+
+def process_issue(issue, repo, max_files=5):
     """ Process issues and fetch associated PRs
     :param issue: Issue object
     :param repo: Repository object
@@ -132,7 +167,7 @@ def process_issue(issue, repo):
             pr_links.extend(prs)
             for pr_link in prs:
                 pr_number = pr_link.split('/')[-1]
-                pr_content = extract_pr_files_content(repo['owner']['login'], repo['name'], pr_number, session)
+                pr_content = extract_pr_files_content(repo['owner']['login'], repo['name'], pr_number, session, max_files=max_files)
                 pr_files_content[pr_link] = pr_content
         if 'body' in event:
             # Pattern to capture "Fixed by #number" or "closed this as completed in #number"
@@ -150,6 +185,7 @@ def process_issue(issue, repo):
         'Issue URL': issue['html_url'],
         'Associated PRs': pr_links,
         'Issue Name': issue['title'],
+        'Issue Question': determine_issue_question(issue['title'] + " " + issue['body']).dict()['answer'],
         'Issue Text': issue['body'],
         'Context': str(comments),
         'PR Files Content': pr_files_content
@@ -168,7 +204,7 @@ def fetch_pr_from_commit(commit_id, repo):
 
 
 
-def check_issues(repo):
+def check_issues(repo, max_files = 5):
     all_issues_df = pd.DataFrame()  # Initialize an empty DataFrame
     issues_url = f"{GITHUB_API}/repos/{repo['owner']['login']}/{repo['name']}/issues"
     params = {'state': 'closed', 'labels': 'good first issue', 'per_page': 100, 'since': '2024-01-01T00:00:00Z'}
@@ -177,7 +213,7 @@ def check_issues(repo):
 
     for issue in issues:
         # print("Issue: ", issue)  # This will help you see what each 'issue' contains
-        issue_df = process_issue(issue, repo)
+        issue_df = process_issue(issue, repo, max_files=max_files)
         issue_df['Repository ID'] = repo['id']
         all_issues_df = pd.concat([all_issues_df, issue_df], ignore_index=True)
         # print(all_issues_df.head(10))
@@ -187,7 +223,7 @@ def check_issues(repo):
     return all_issues_df
 
 
-def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000"):
+def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000", max_pr_files=10):
     """ Main function to fetch issues from repositories and create test set"""
     main_df = pd.DataFrame()
     rate_limit_status = requests.get('https://api.github.com/rate_limit', headers=HEADERS)
@@ -198,7 +234,7 @@ def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000"):
     for i, repo in enumerate(repos):
         if i == n:
             break
-        issues_df = check_issues(repo)
+        issues_df = check_issues(repo, max_files=max_pr_files)
         main_df = pd.concat([main_df, issues_df], ignore_index=True)
     #
     # print(main_df.head(10))

@@ -7,3 +7,4 @@ deepeval
 langchain-core
 langchain-community
 langchain-text-splitters
+instructor
