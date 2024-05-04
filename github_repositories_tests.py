@@ -40,21 +40,67 @@ def extract_pr_files_content(owner, repo, pull_number, session, max_files=None):
 
     return result
 
-def get_repositories(created_after="2018-01-01", stars="1000..5000", forks="100..1000"):
-    """Fetch repositories based on the given search criteria."""
-    query = (
-        "language:python stars:1000..5000 forks:100..1000"
-        f" created:>={created_after } license:mit is:public"
-    )
+# def get_repositories(created_after="2018-01-01", stars="1000..5000", forks="100..1000", max_files=None):
+#     """Fetch repositories based on the given search criteria."""
+#     query = (
+#         "language:python stars:1000..5000 forks:100..1000"
+#         f" created:>={created_after } license:mit is:public"
+#     )
+#     params = {
+#         'q': query,
+#         'sort': 'updated',
+#         'order': 'desc',
+#         'per_page': 100
+#     }
+#     response = requests.get(f"{GITHUB_API}/search/repositories", params=params)
+#     return response.json().get('items', [])
+#
+def get_repositories(created_after="2018-01-01", stars="1000..5000", forks="100..1000", max_files=None):
+    """
+    Fetches repositories based on specified search criteria with optional file count filtering.
+
+    Args:
+    created_after (str): Filter repos created after this date.
+    stars (str): Range of stars the repository must have.
+    forks (str): Range of forks the repository must have.
+    max_files (int, optional): Maximum number of files allowed in the repository.
+
+    Returns:
+    list: A list of repositories meeting the criteria.
+    """
+    headers = {'Authorization': f'token {TOKEN}'}
+    query = f"language:python stars:{stars} forks:{forks} created:>={created_after} license:mit is:public"
     params = {
         'q': query,
         'sort': 'updated',
         'order': 'desc',
         'per_page': 100
     }
-    response = requests.get(f"{GITHUB_API}/search/repositories", params=params)
-    return response.json().get('items', [])
 
+    try:
+        response = requests.get(f"{GITHUB_API}/search/repositories", headers=headers, params=params)
+        response.raise_for_status()
+        repositories = response.json().get('items', [])
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error occurred: {http_err}")
+        return []
+    except Exception as err:
+        print(f"An error occurred: {err}")
+        return []
+
+    filtered_repositories = []
+    for repo in repositories:
+        files_url = f"{GITHUB_API}/repos/{repo['owner']['login']}/{repo['name']}/contents"
+        try:
+            files_response = requests.get(files_url, headers=headers)
+            files_response.raise_for_status()
+            files_count = len(files_response.json())
+            if max_files is None or files_count <= max_files:
+                filtered_repositories.append(repo)
+        except requests.exceptions.HTTPError as e:
+            print(f"Error retrieving files for {repo['name']}: {e.response.status_code}")
+
+    return filtered_repositories
 
 def fetch_issue_comments(issue_url):
     """Fetch the initial comment of an issue from its GitHub URL."""
@@ -92,8 +138,11 @@ def fetch_issue_data(issue_number, repo):
         comments_data = comments_response.json()
         comments_body_string = ""
 
+        print("cmmm data is", comments_data)
+
         # Iterate over each comment and append its body to the result string
         for comment in comments_data:
+            # print("comm is", str(comment))
             comments_body_string += comment['body'] + "\n\n"  # Add two newlines for better readability between comments
 
         # return comments_body_string
@@ -139,6 +188,8 @@ def process_issue(issue, repo, max_files=5):
     """
     # Fetch discussions and the first comment
     discussions, comments= fetch_issue_data(issue['number'], repo)
+    print("Discussions: ", discussions)
+    print("Comments: ", comments)
 
     # Collect PR links
     pr_links = []
@@ -185,7 +236,7 @@ def process_issue(issue, repo, max_files=5):
         'Issue URL': issue['html_url'],
         'Associated PRs': pr_links,
         'Issue Name': issue['title'],
-        'Issue Question': determine_issue_question(issue['title'] + " " + issue['body']).dict()['answer'],
+        'Issue Question': str(determine_issue_question(issue['title'] + " " + issue['body']).dict()),
         'Issue Text': issue['body'],
         'Context': str(comments),
         'PR Files Content': pr_files_content
