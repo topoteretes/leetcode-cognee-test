@@ -36,10 +36,11 @@ def extract_pr_files_content(owner, repo, pull_number, session):
 
     return result
 
-def get_repositories():
+def get_repositories(created_after="2018-01-01", stars="1000..5000", forks="100..1000"):
+    """Fetch repositories based on the given search criteria."""
     query = (
         "language:python stars:1000..5000 forks:100..1000"
-        " created:>=2018-01-01 license:mit is:public"
+        f" created:>={created_after } license:mit is:public"
     )
     params = {
         'q': query,
@@ -96,6 +97,11 @@ def fetch_issue_data(issue_number, repo):
 
 
 def process_issue(issue, repo):
+    """ Process issues and fetch associated PRs
+    :param issue: Issue object
+    :param repo: Repository object
+    :return: DataFrame with issue data
+    """
     # Fetch discussions and the first comment
     discussions, comments= fetch_issue_data(issue['number'], repo)
 
@@ -174,21 +180,30 @@ def check_issues(repo):
         issue_df = process_issue(issue, repo)
         issue_df['Repository ID'] = repo['id']
         all_issues_df = pd.concat([all_issues_df, issue_df], ignore_index=True)
+        # print(all_issues_df.head(10))
+
+
 
     return all_issues_df
 
 
-def main(n):
+def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000"):
+    """ Main function to fetch issues from repositories and create test set"""
     main_df = pd.DataFrame()
     rate_limit_status = requests.get('https://api.github.com/rate_limit', headers=HEADERS)
     print(rate_limit_status.json())
-    repos = get_repositories()
+    repos = get_repositories(created_after=created_after, stars=stars, forks=forks)
+    print(f"Found {len(repos)} repositories.")
 
     for i, repo in enumerate(repos):
         if i == n:
             break
         issues_df = check_issues(repo)
         main_df = pd.concat([main_df, issues_df], ignore_index=True)
+    #
+    # print(main_df.head(10))
+    #
+    main_df = main_df[main_df['PR Files Content'].apply(lambda x: bool(x))]
 
     pd.set_option('display.max_columns', None)  # Show all columns
     pd.set_option('display.max_rows', None)  # Show all rows
@@ -198,4 +213,4 @@ def main(n):
     return main_df.to_csv('issues.csv', index=False)
 
 if __name__ == "__main__":
-    main(n=50)
+    main(n=20)
