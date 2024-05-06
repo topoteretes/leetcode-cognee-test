@@ -138,7 +138,7 @@ def fetch_issue_data(issue_number, repo):
         comments_data = comments_response.json()
         comments_body_string = ""
 
-        print("cmmm data is", comments_data)
+
 
         # Iterate over each comment and append its body to the result string
         for comment in comments_data:
@@ -179,6 +179,23 @@ def determine_issue_question(issue_title_body):
 
     return response
 
+def get_last_commit_before_merge(repo_owner, repo_name, pr_number, session):
+    pr_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls/{pr_number}"
+    pr_response = session.get(pr_url)
+    pr_response.raise_for_status()
+    pr_data = pr_response.json()
+
+    if 'merge_commit_sha' in pr_data and pr_data['merged']:
+        merge_commit_sha = pr_data['merge_commit_sha']
+        commit_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{merge_commit_sha}"
+        commit_response = session.get(commit_url)
+        commit_response.raise_for_status()
+        commit_data = commit_response.json()
+
+        if 'parents' in commit_data and len(commit_data['parents']) > 0:
+            return commit_data['parents'][0]['sha']  # Return the first parent commit SHA
+    return None
+
 
 def process_issue(issue, repo, max_files=5):
     """ Process issues and fetch associated PRs
@@ -188,12 +205,12 @@ def process_issue(issue, repo, max_files=5):
     """
     # Fetch discussions and the first comment
     discussions, comments= fetch_issue_data(issue['number'], repo)
-    print("Discussions: ", discussions)
-    print("Comments: ", comments)
+
 
     # Collect PR links
     pr_links = []
     fix_prs = []
+    master_commits_before_merge = {}
     discussion_context =""
     counter = 0
     first_comment = ""
@@ -220,6 +237,9 @@ def process_issue(issue, repo, max_files=5):
                 pr_number = pr_link.split('/')[-1]
                 pr_content = extract_pr_files_content(repo['owner']['login'], repo['name'], pr_number, session, max_files=max_files)
                 pr_files_content[pr_link] = pr_content
+                last_commit_before_merge = get_last_commit_before_merge(repo['owner']['login'], repo['name'], pr_number, session)
+                if last_commit_before_merge:
+                    master_commits_before_merge[pr_link] = last_commit_before_merge
         if 'body' in event:
             # Pattern to capture "Fixed by #number" or "closed this as completed in #number"
             fixed_by_prs = re.findall(r"(?:Fixed by|closed this as completed in) #(\d+)", event['body'])
@@ -233,15 +253,17 @@ def process_issue(issue, repo, max_files=5):
 
     # Compile issue data
     issue_data = {
+        'Repository': f"{repo['owner']['login']}/{repo['name']}",
         'Issue URL': issue['html_url'],
         'Associated PRs': pr_links,
         'Issue Name': issue['title'],
-        'Issue Question': str(determine_issue_question(issue['title'] + " " + issue['body']).dict()),
+        'Issue Question': str(determine_issue_question(str(issue['title']) + " " + str(issue['body'])).dict()),
         'Issue Text': issue['body'],
         'Context': str(comments),
-        'PR Files Content': pr_files_content
+        'PR Files Content': pr_files_content,
+        'Master Branch Commits Before Merge': master_commits_before_merge
     }
-    print("Issue Data: ", issue_data)
+    print("Master commits Data: ", master_commits_before_merge)
 
     return pd.DataFrame([issue_data])
 
@@ -297,7 +319,7 @@ def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000", m
     pd.set_option('display.max_colwidth', None)
 
     # print(main_df.head(10))
-    return main_df.to_csv('issues.csv', index=False)
+    return main_df.to_json('issues_list.json', index=False)
 
 if __name__ == "__main__":
     main(n=20)
