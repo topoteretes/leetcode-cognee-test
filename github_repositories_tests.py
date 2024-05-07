@@ -249,8 +249,6 @@ def process_issue(issue, repo, max_files=5):
         for pr_number in fix_prs:
             pr_link = f"https://github.com/{repo['owner']['login']}/{repo['name']}/pull/{pr_number}"
             pr_links.append(pr_link)
-
-
     # Compile issue data
     issue_data = {
         'Repository': f"{repo['owner']['login']}/{repo['name']}",
@@ -260,6 +258,7 @@ def process_issue(issue, repo, max_files=5):
         'Issue Question': str(determine_issue_question(str(issue['title']) + " " + str(issue['body'])).dict()),
         'Issue Text': issue['body'],
         'Context': str(comments),
+        'PR prediction': pr_files_content,
         'PR Files Content': pr_files_content,
         'Master Branch Commits Before Merge': master_commits_before_merge
     }
@@ -309,17 +308,30 @@ def main(n, created_after="2018-01-01", stars="1000..5000", forks="100..1000", m
             break
         issues_df = check_issues(repo, max_files=max_pr_files)
         main_df = pd.concat([main_df, issues_df], ignore_index=True)
-    #
-    # print(main_df.head(10))
-    #
+
     main_df = main_df[main_df['PR Files Content'].apply(lambda x: bool(x))]
 
     pd.set_option('display.max_columns', None)  # Show all columns
     pd.set_option('display.max_rows', None)  # Show all rows
     pd.set_option('display.max_colwidth', None)
 
-    # print(main_df.head(10))
-    return main_df.to_json('issues_list.json', index=False)
+    file_path = 'issues_list.csv'
+
+    try:
+        # Step 1: Load the existing data
+        existing_df = pd.read_csv(file_path)
+    except FileNotFoundError:
+        # If the file does not exist, create an empty DataFrame
+        existing_df = pd.DataFrame()
+
+    # Step 2: Concatenate the existing data with the new data
+    # Ensure both DataFrames have the same columns for proper concatenation
+    if not existing_df.empty and not existing_df.columns.equals(main_df.columns):
+        raise ValueError("Columns of existing DataFrame and main DataFrame do not match.")
+    combined_df = pd.concat([existing_df, main_df], ignore_index=True)
+
+    # Step 3: Write the combined DataFrame back to the CSV file
+    combined_df.to_csv(file_path, index=False)
 
 if __name__ == "__main__":
     main(n=20)
